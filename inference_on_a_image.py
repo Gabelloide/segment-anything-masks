@@ -27,9 +27,6 @@ def plot_boxes_to_image(image_pil, tgt):
     draw = ImageDraw.Draw(image_pil)
     mask = Image.new("L", image_pil.size, 0)
     mask_draw = ImageDraw.Draw(mask)
-    
-    # List of box coordinates
-    box_coords = []
 
     # draw boxes and masks
     for box, label in zip(boxes, labels):
@@ -44,8 +41,6 @@ def plot_boxes_to_image(image_pil, tgt):
         x0, y0, x1, y1 = box
         x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
         
-        box_coords.append([x0, y0, x1, y1])
-
         draw.rectangle([x0, y0, x1, y1], outline=color, width=6)
         # draw.text((x0, y0), str(label), fill=color)
 
@@ -61,8 +56,31 @@ def plot_boxes_to_image(image_pil, tgt):
 
         mask_draw.rectangle([x0, y0, x1, y1], fill=255, width=6)
 
-    return image_pil, mask, box_coords  
+    return image_pil, mask
 
+
+def get_box_from_image(tgt):
+  """Returns the box coordinates from the target dictionary that was computed by GroundingDINO."""
+  H, W = tgt["size"]
+  boxes = tgt["boxes"]
+  labels = tgt["labels"]
+  assert len(boxes) == len(labels), "boxes and labels must have same length"
+
+  # Liste des coordonnées des boîtes
+  box_coords = []
+
+  # Calculer les coordonnées des boîtes
+  for box in boxes:
+      # Convertir de [0..1] à [0..W, 0..H]
+      box = box * torch.Tensor([W, H, W, H])
+      # Convertir de xywh à xyxy
+      box[:2] -= box[2:] / 2
+      box[2:] += box[:2]
+      
+      x0, y0, x1, y1 = box.int().tolist()  # Conversion des coordonnées en entier
+      box_coords.append([x0, y0, x1, y1])  # Ajouter les coordonnées à la liste
+
+  return box_coords
 
 def load_image(image_path):
     # load image
@@ -91,15 +109,12 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
 
 
 def create_sam_mask(box_coordinates, image_path, sam_predictor):
-  
+  """Computes a SAM mask for a given image and box coordinates."""
   image = cv2.imread(image_path)
   image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
   predictor.set_image(image)
   
   input_box = np.array(box_coordinates)
-  
-  # Convert numpy arrays to tensors to use GPU
-  input_box_tensor = torch.tensor(input_box).to(DEVICE)
   
   masks, scores, logits = sam_predictor.predict(
       box=input_box,
@@ -185,7 +200,7 @@ if __name__ == "__main__":
     parser.add_argument("--token_spans", type=str, default=None, help="The positions of start and end positions of phrases of interest.")
     parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!, default=False")
     parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
-    parser.add_argument("--checkpoint_path", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
+    parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
     args = parser.parse_args()
     
     
@@ -225,7 +240,6 @@ if __name__ == "__main__":
             text_threshold = None
             print("Using token_spans. Set the text_threshold to None.")
 
-
         # run model
         boxes_filt, pred_phrases = get_grounding_output(
             model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
@@ -240,10 +254,8 @@ if __name__ == "__main__":
             "size": [size[1], size[0]],  # H,W
             "labels": pred_phrases,
         }
-        # import ipdb; ipdb.set_trace()
-        image_with_box, mask, box_coords = plot_boxes_to_image(image_pil, pred_dict)
-        # image_with_box.save(os.path.join(output_dir, f"{image_file}_pred_{i}.jpg"))
-        
+
+        box_coords = get_box_from_image(pred_dict)
         
         # Box coordinates are in box_coords, we can give it to SAM now
         DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
