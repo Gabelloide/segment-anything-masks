@@ -109,19 +109,34 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
 
 
 def create_sam_mask(box_coordinates, image_path, sam_predictor):
-  """Computes a SAM mask for a given image and box coordinates."""
-  image = cv2.imread(image_path)
-  image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-  predictor.set_image(image)
-  
-  input_box = np.array(box_coordinates)
-  
-  masks, scores, logits = sam_predictor.predict(
-      box=input_box,
-      multimask_output=True,
-  )
-  
-  return masks, scores, logits
+    """Computes SAM masks for a given image and box coordinates.
+    If multiple boxes are provided, the function will return several masks and scores.
+    SAM is creating 3 masks for each box."""
+    
+    # Charge l'image
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    sam_predictor.set_image(image)
+    
+    # Dictionnaire pour stocker les résultats
+    results = {}
+    
+    # Traiter chaque boîte individuellement
+    for idx, box in enumerate(box_coordinates):
+        input_box = np.array([box])  # S'assurer que la boîte est dans un tableau 2D
+        masks, scores, logits = sam_predictor.predict(
+            box=input_box,
+            multimask_output=True,
+        )
+        
+        # Stocker les résultats dans le dictionnaire
+        results[idx] = {
+            'masks': masks,      # Liste des masques pour la boîte
+            'scores': scores,    # Liste des scores pour la boîte
+            'logits': logits     # Liste des logits pour la boîte (si nécessaire)
+        }
+
+    return results
 
 
 def get_grounding_output(model, image, caption, box_threshold, text_threshold=None, with_logits=True, cpu_only=False, token_spans=None):
@@ -245,8 +260,6 @@ if __name__ == "__main__":
             model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
         )
         
-        print(boxes_filt)
-
         # visualize pred
         size = image_pil.size
         pred_dict = {
@@ -262,14 +275,26 @@ if __name__ == "__main__":
         sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b.pth").to(DEVICE)
         predictor = SamPredictor(sam)
         
-        masks, scores, logits = create_sam_mask(box_coords, image_path, predictor)
-        
-        best_mask_index = np.argmax(scores)
-        best_mask = masks[best_mask_index]
-        best_score = scores[best_mask_index]
-        
-        # Save the best mask on disk
-        mask_image = (best_mask * 255).astype(np.uint8)
-        cv2.imwrite(f"{output_dir}\\{image_file}.png", mask_image)
-        print(f"Saved {output_dir}\\{image_file}.png with score {best_score:.4f}")
+        results = create_sam_mask(box_coords, image_path, predictor)
+
+        # For each box, there are three masks, we will save the best one for each one.
+        for idx, result in results.items():
+            masks = result['masks']
+            scores = result['scores']
+            
+            # Vérifiez qu'il y a des masques et des scores avant d'essayer de trouver le meilleur
+            if masks.size == 0 or scores.size == 0:
+                print(f"No masks or scores for box {idx}. Skipping...")
+                continue
+
+            # Trouver l'indice du meilleur masque basé sur le score
+            best_mask_index = np.argmax(scores)
+            best_mask = masks[best_mask_index]
+            best_score = scores[best_mask_index]
+
+            # Sauvegarder le meilleur masque sur le disque
+            mask_image = (best_mask * 255).astype(np.uint8)
+            mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Utiliser un nom de fichier unique
+            cv2.imwrite(mask_filename, mask_image)
+            print(f"Saved {mask_filename} with score {best_score:.4f}")
 
