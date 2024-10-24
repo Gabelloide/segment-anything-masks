@@ -15,7 +15,7 @@ pip install opencv-python pycocotools matplotlib onnxruntime onnx
 ```
 
 ```
-git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git`
+git clone https://github.com/IDEA-Research/Grounded-Segment-Anything.git
 
 cd Grounded-Segment-Anything
 
