@@ -7,17 +7,15 @@ from pathlib import Path
 MODEL_TYPE = "vit_b"
 CHECKPOINT_PATH = "sam_vit_b.pth"
 
-IMAGE_PATH = "frame_0454.jpg"
-
 DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 sam = sam_model_registry[MODEL_TYPE](checkpoint=CHECKPOINT_PATH).to(DEVICE)
 predictor = SamPredictor(sam)
 
-FOLDER_PATH = "C:\\Users\\se55980\\Desktop\\Mondial_Auto\\Twingo\\cam1"
+FOLDER_PATH = "C:\\Users\\olivi\\Documents\\Olivier\\Mondial_Auto\\R17\\inputs\\images\\cam1"
 images_paths = [os.path.join(FOLDER_PATH, path) for path in os.listdir(FOLDER_PATH) if path.lower().endswith(('.png', '.jpg'))]
 
-SAVE_PATH = "C:\\palette\\apl\\segment_anything\\output"
+SAVE_PATH = "C:\\Users\\olivi\\Documents\\Olivier\\Mondial_Auto\\R17\\inputs\\masks\\cam1"
 
 for path in images_paths:
     image_name = Path(path).stem
