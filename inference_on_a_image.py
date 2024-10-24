@@ -7,6 +7,8 @@ import numpy as np
 import torch
 from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
+import logging
+import warnings
 
 from segment_anything import SamPredictor, sam_model_registry
 
@@ -17,6 +19,11 @@ from groundingdino.util.slconfig import SLConfig
 from groundingdino.util.utils import clean_state_dict, get_phrases_from_posmap
 from groundingdino.util.vl_utils import create_positive_map_from_span
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+# Ignore warnings
+warnings.filterwarnings("ignore")
 
 def plot_boxes_to_image(image_pil, tgt):
     H, W = tgt["size"]
@@ -66,21 +73,21 @@ def get_box_from_image(tgt):
   labels = tgt["labels"]
   assert len(boxes) == len(labels), "boxes and labels must have same length"
 
-  # Liste des coordonnées des boîtes
+  # all boxes
   box_coords = []
 
-  # Calculer les coordonnées des boîtes
+  # Get boxes coords
   for box in boxes:
-      # Convertir de [0..1] à [0..W, 0..H]
+      # From [0..1] to [0..W, 0..H]
       box = box * torch.Tensor([W, H, W, H])
-      # Convertir de xywh à xyxy
+      # From xywh to xyxy
       box[:2] -= box[2:] / 2
       box[2:] += box[:2]
       
-      x0, y0, x1, y1 = box.int().tolist()  # Conversion des coordonnées en entier
-      box_coords.append([x0, y0, x1, y1])  # Ajouter les coordonnées à la liste
-
+      x0, y0, x1, y1 = box.int().tolist()  # To integers
+      box_coords.append([x0, y0, x1, y1])
   return box_coords
+
 
 def load_image(image_path):
     # load image
@@ -103,7 +110,7 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
     model = build_model(args)
     checkpoint = torch.load(model_checkpoint_path, map_location="cpu")
     load_res = model.load_state_dict(clean_state_dict(checkpoint["model"]), strict=False)
-    print(load_res)
+    logging.info(load_res)
     _ = model.eval()
     return model
 
@@ -113,27 +120,27 @@ def create_sam_mask(box_coordinates, image_path, sam_predictor):
     If multiple boxes are provided, the function will return several masks and scores.
     SAM is creating 3 masks for each box."""
     
-    # Charge l'image
+    # Load the image
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     sam_predictor.set_image(image)
     
-    # Dictionnaire pour stocker les résultats
+    # Future results
     results = {}
     
-    # Traiter chaque boîte individuellement
+    # Process each box
     for idx, box in enumerate(box_coordinates):
-        input_box = np.array([box])  # S'assurer que la boîte est dans un tableau 2D
+        input_box = np.array([box])  # Ensure the box is in a list
         masks, scores, logits = sam_predictor.predict(
             box=input_box,
             multimask_output=True,
         )
         
-        # Stocker les résultats dans le dictionnaire
+        # Dictionary for the results
         results[idx] = {
-            'masks': masks,      # Liste des masques pour la boîte
-            'scores': scores,    # Liste des scores pour la boîte
-            'logits': logits     # Liste des logits pour la boîte (si nécessaire)
+            'masks': masks,
+            'scores': scores,
+            'logits': logits
         }
 
     return results
@@ -253,7 +260,7 @@ if __name__ == "__main__":
         # set the text_threshold to None if token_spans is set.
         if token_spans is not None:
             text_threshold = None
-            print("Using token_spans. Set the text_threshold to None.")
+            logging.info("Using token_spans. Set the text_threshold to None.")
 
         # run model
         boxes_filt, pred_phrases = get_grounding_output(
@@ -282,19 +289,18 @@ if __name__ == "__main__":
             masks = result['masks']
             scores = result['scores']
             
-            # Vérifiez qu'il y a des masques et des scores avant d'essayer de trouver le meilleur
+            # Skip if no masks or scores found
             if masks.size == 0 or scores.size == 0:
-                print(f"No masks or scores for box {idx}. Skipping...")
+                logging.warning(f"No masks or scores found for box {idx}. Skipping.")
                 continue
 
-            # Trouver l'indice du meilleur masque basé sur le score
+            # Find the best mask
             best_mask_index = np.argmax(scores)
             best_mask = masks[best_mask_index]
             best_score = scores[best_mask_index]
 
-            # Sauvegarder le meilleur masque sur le disque
+            # Save the mask
             mask_image = (best_mask * 255).astype(np.uint8)
-            mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Utiliser un nom de fichier unique
+            mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
             cv2.imwrite(mask_filename, mask_image)
-            print(f"Saved {mask_filename} with score {best_score:.4f}")
-
+            logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
