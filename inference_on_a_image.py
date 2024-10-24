@@ -9,6 +9,7 @@ from PIL import Image, ImageDraw, ImageFont
 from pathlib import Path
 import logging
 import warnings
+from tqdm import tqdm
 
 from segment_anything import SamPredictor, sam_model_registry
 
@@ -212,7 +213,6 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
 
 
 if __name__ == "__main__":
-
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_dir", "-d", type=str, required=True, help="path to image directory")
     parser.add_argument("--text_prompt", "-t", type=str, required=True, help="text prompt")
@@ -225,10 +225,9 @@ if __name__ == "__main__":
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
     args = parser.parse_args()
     
-    
     # cfg
-    config_file = args.config_file  # change the path of the model config file
-    checkpoint_path = args.checkpoint_path  # change the path of the model
+    config_file = args.config_file
+    checkpoint_path = args.checkpoint_path
     image_dir = args.image_dir
     text_prompt = args.text_prompt
     output_dir = args.output_dir
@@ -238,8 +237,7 @@ if __name__ == "__main__":
 
     # make dir
     os.makedirs(output_dir, exist_ok=True)
-    
-    
+
     # Check if the provided path is a directory
     if not os.path.isdir(image_dir):
         raise ValueError(f"The provided path {image_dir} is not a directory.")
@@ -247,15 +245,12 @@ if __name__ == "__main__":
     # List all image files in the directory
     image_files = [f for f in os.listdir(image_dir) if os.path.isfile(os.path.join(image_dir, f))]
 
-    for i,image_file in enumerate(image_files):
+    for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
         image_path = os.path.join(image_dir, image_file)
         # load image
         image_pil, image = load_image(image_path)
         # load model
         model = load_model(config_file, checkpoint_path, cpu_only=args.cpu_only)
-
-        # visualize raw image
-        # image_pil.save(os.path.join(output_dir, f"{image_file}_raw_image_{i}.jpg"))
 
         # set the text_threshold to None if token_spans is set.
         if token_spans is not None:
