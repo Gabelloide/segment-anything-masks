@@ -161,7 +161,6 @@ def create_sam_mask(box_coordinates, image_path, sam_predictor, multiple_boxes=F
         return masks, scores, logits
 
 
-
 def get_grounding_output(model, image, caption, box_threshold, text_threshold=None, with_logits=True, cpu_only=False, token_spans=None):
     assert text_threshold is not None or token_spans is not None, "text_threshould and token_spans should not be None at the same time!"
     caption = caption.lower()
@@ -251,6 +250,9 @@ if __name__ == "__main__":
     parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
     parser.add_argument("--split_masks", "-s", action="store_true", default=False, help="Create one mask per detected subject in the image")
+    parser.add_argument("--sam_checkpoint_path", "-g", type=str, default="sam_vit_h.pth", help="path to the sam model checkpoint")
+    parser.add_argument("--sam_checkpoint_type", "-y", type=str, default="vit_h", help="type of the sam model checkpoint : [vit_b, vit_h, vit_l]")
+
     args = parser.parse_args()
     
     # cfg
@@ -262,6 +264,8 @@ if __name__ == "__main__":
     box_threshold = args.box_threshold
     text_threshold = args.text_threshold
     token_spans = args.token_spans
+    sam_checkpoint_path = args.sam_checkpoint_path
+    sam_checkpoint_type = args.sam_checkpoint_type
 
     # make dir
     os.makedirs(output_dir, exist_ok=True)
@@ -273,7 +277,7 @@ if __name__ == "__main__":
     # List all image files in the directory
     image_files = [f for f in os.listdir(image_dir) if os.path.isfile(os.path.join(image_dir, f))]
 
-    sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h.pth").to(DEVICE)
+    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path).to(DEVICE)
     predictor = SamPredictor(sam)
 
     for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
@@ -346,7 +350,7 @@ if __name__ == "__main__":
 
                 # Save the fused mask
                 mask_image = (fused_mask * 255).astype(np.uint8)
-                mask_filename = f"{output_dir}\\{image_file}_fused.png"
+                mask_filename = f"{output_dir}\\{image_file}.png"
                 cv2.imwrite(mask_filename, mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
         except Exception as e:
