@@ -26,6 +26,10 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
+# Constants
+DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+
 def plot_boxes_to_image(image_pil, tgt):
     H, W = tgt["size"]
     boxes = tgt["boxes"]
@@ -116,35 +120,46 @@ def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
     return model
 
 
-def create_sam_mask(box_coordinates, image_path, sam_predictor):
+def create_sam_mask(box_coordinates, image_path, sam_predictor, multiple_boxes=False):
     """Computes SAM masks for a given image and box coordinates.
     If multiple boxes are provided, the function will return several masks and scores.
-    SAM is creating 3 masks for each box."""
-    
+    SAM is creating 3 masks for each box.
+    If multiple_boxes is True, will combine all boxes in one image to compute only 3 masks."""
     # Load the image
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     sam_predictor.set_image(image)
-    
-    # Future results
-    results = {}
-    
-    # Process each box
-    for idx, box in enumerate(box_coordinates):
-        input_box = np.array([box])  # Ensure the box is in a list
-        masks, scores, logits = sam_predictor.predict(
-            box=input_box,
+
+    if not multiple_boxes:
+        # Future results
+        results = {}
+        
+        # Process each box
+        for idx, box in enumerate(box_coordinates):
+            input_box = np.array([box])  # Ensure the box is in a list
+            masks, scores, logits = sam_predictor.predict(
+                box=input_box,
+                multimask_output=True,
+            )
+            
+            # Dictionary for the results
+            results[idx] = {
+                'masks': masks,
+                'scores': scores,
+                'logits': logits
+            }
+        return results
+    else:
+        input_boxes = torch.tensor(box_coordinates, device=DEVICE)
+        transformed_boxes = sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
+        masks, scores, logits = sam_predictor.predict_torch(
+            point_coords=None,
+            point_labels=None,
+            boxes=transformed_boxes,
             multimask_output=True,
         )
-        
-        # Dictionary for the results
-        results[idx] = {
-            'masks': masks,
-            'scores': scores,
-            'logits': logits
-        }
+        return masks, scores, logits
 
-    return results
 
 
 def get_grounding_output(model, image, caption, box_threshold, text_threshold=None, with_logits=True, cpu_only=False, token_spans=None):
@@ -212,6 +227,18 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
     return boxes_filt, pred_phrases
 
 
+def fuse_masks(masks):
+    """Fuses multiple masks into a single mask."""
+    fused_mask = np.zeros_like(masks[0][0], dtype=np.uint8)
+
+    for i in range(masks.shape[0]):
+        for j in range(masks.shape[1]):
+            mask = masks[i][j]
+            fused_mask = np.maximum(fused_mask, mask)
+
+    return fused_mask
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_dir", "-d", type=str, required=True, help="path to image directory")
@@ -220,9 +247,10 @@ if __name__ == "__main__":
     parser.add_argument("--box_threshold", type=float, default=0.3, help="box threshold")
     parser.add_argument("--text_threshold", type=float, default=0.25, help="text threshold")
     parser.add_argument("--token_spans", type=str, default=None, help="The positions of start and end positions of phrases of interest.")
-    parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!, default=False")
+    parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!", default=False)
     parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
+    parser.add_argument("--split_masks", "-s", action="store_true", default=False, help="Create one mask per detected subject in the image")
     args = parser.parse_args()
     
     # cfg
@@ -244,6 +272,9 @@ if __name__ == "__main__":
 
     # List all image files in the directory
     image_files = [f for f in os.listdir(image_dir) if os.path.isfile(os.path.join(image_dir, f))]
+
+    sam = sam_model_registry["vit_h"](checkpoint="sam_vit_h.pth").to(DEVICE)
+    predictor = SamPredictor(sam)
 
     for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
         image_path = os.path.join(image_dir, image_file)
@@ -271,31 +302,49 @@ if __name__ == "__main__":
         }
 
         box_coords = get_box_from_image(pred_dict)
-        
         # Box coordinates are in box_coords, we can give it to SAM now
-        DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        sam = sam_model_registry["vit_b"](checkpoint="sam_vit_b.pth").to(DEVICE)
-        predictor = SamPredictor(sam)
-        
-        results = create_sam_mask(box_coords, image_path, predictor)
 
-        # For each box, there are three masks, we will save the best one for each one.
-        for idx, result in results.items():
-            masks = result['masks']
-            scores = result['scores']
+        # Creating one mask for each box if args.split_masks is True
+        if args.split_masks:
+            results = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=False)
+
+            # For each box, there are three masks, we will save the best one for each one.
+            for idx, result in results.items():
+                masks = result['masks']
+                scores = result['scores']
+                
+                # Skip if no masks or scores found
+                if masks.size == 0 or scores.size == 0:
+                    logging.warning(f"No masks or scores found for box {idx}. Skipping.")
+                    continue
+
+                # Find the best mask
+                best_mask_index = np.argmax(scores)
+                best_mask = masks[best_mask_index]
+                best_score = scores[best_mask_index]
+
+                # Save the mask
+                mask_image = (best_mask * 255).astype(np.uint8)
+                mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
+                cv2.imwrite(mask_filename, mask_image)
+                logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
+        else:
+            masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+
+            # In this case, results are on GPU, getting them back
+            masks = masks.cpu().numpy()
+            scores = scores.cpu().numpy()
+            logits = logits.cpu().numpy()
             
             # Skip if no masks or scores found
             if masks.size == 0 or scores.size == 0:
                 logging.warning(f"No masks or scores found for box {idx}. Skipping.")
                 continue
 
-            # Find the best mask
-            best_mask_index = np.argmax(scores)
-            best_mask = masks[best_mask_index]
-            best_score = scores[best_mask_index]
-
-            # Save the mask
-            mask_image = (best_mask * 255).astype(np.uint8)
-            mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
+            fused_mask = fuse_masks(masks)
+ 
+            # Save the fused mask
+            mask_image = (fused_mask * 255).astype(np.uint8)
+            mask_filename = f"{output_dir}\\{image_file}.png"
             cv2.imwrite(mask_filename, mask_image)
-            logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
+            logging.info(f"Saved fused mask {mask_filename}")
