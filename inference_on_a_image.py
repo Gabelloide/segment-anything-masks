@@ -277,74 +277,78 @@ if __name__ == "__main__":
     predictor = SamPredictor(sam)
 
     for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
-        image_path = os.path.join(image_dir, image_file)
-        # load image
-        image_pil, image = load_image(image_path)
-        # load model
-        model = load_model(config_file, checkpoint_path, cpu_only=args.cpu_only)
+        try:
+            image_path = os.path.join(image_dir, image_file)
+            # load image
+            image_pil, image = load_image(image_path)
+            # load model
+            model = load_model(config_file, checkpoint_path, cpu_only=args.cpu_only)
 
-        # set the text_threshold to None if token_spans is set.
-        if token_spans is not None:
-            text_threshold = None
-            logging.info("Using token_spans. Set the text_threshold to None.")
+            # set the text_threshold to None if token_spans is set.
+            if token_spans is not None:
+                text_threshold = None
+                logging.info("Using token_spans. Set the text_threshold to None.")
 
-        # run model
-        boxes_filt, pred_phrases = get_grounding_output(
-            model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
-        )
-        
-        # visualize pred
-        size = image_pil.size
-        pred_dict = {
-            "boxes": boxes_filt,
-            "size": [size[1], size[0]],  # H,W
-            "labels": pred_phrases,
-        }
+            # run model
+            boxes_filt, pred_phrases = get_grounding_output(
+                model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
+            )
+            
+            # visualize pred
+            size = image_pil.size
+            pred_dict = {
+                "boxes": boxes_filt,
+                "size": [size[1], size[0]],  # H,W
+                "labels": pred_phrases,
+            }
 
-        box_coords = get_box_from_image(pred_dict)
-        # Box coordinates are in box_coords, we can give it to SAM now
+            box_coords = get_box_from_image(pred_dict)
 
-        # Creating one mask for each box if args.split_masks is True
-        if args.split_masks:
-            results = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=False)
+            # Creating one mask for each box if args.split_masks is True
+            if args.split_masks:
+                results = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=False)
 
-            # For each box, there are three masks, we will save the best one for each one.
-            for idx, result in results.items():
-                masks = result['masks']
-                scores = result['scores']
+                # For each box, there are three masks, we will save the best one for each one.
+                for idx, result in results.items():
+                    masks = result['masks']
+                    scores = result['scores']
+                    
+                    # Skip if no masks or scores found
+                    if masks.size == 0 or scores.size == 0:
+                        logging.warning(f"No masks or scores found for box {idx}. Skipping.")
+                        continue
+
+                    # Find the best mask
+                    best_mask_index = np.argmax(scores)
+                    best_mask = masks[best_mask_index]
+                    best_score = scores[best_mask_index]
+
+                    # Save the mask
+                    mask_image = (best_mask * 255).astype(np.uint8)
+                    mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
+                    cv2.imwrite(mask_filename, mask_image)
+                    logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
+            else:
+                masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+
+                # In this case, results are on GPU, getting them back
+                masks = masks.cpu().numpy()
+                scores = scores.cpu().numpy()
+                logits = logits.cpu().numpy()
                 
                 # Skip if no masks or scores found
                 if masks.size == 0 or scores.size == 0:
-                    logging.warning(f"No masks or scores found for box {idx}. Skipping.")
+                    logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
                     continue
 
-                # Find the best mask
-                best_mask_index = np.argmax(scores)
-                best_mask = masks[best_mask_index]
-                best_score = scores[best_mask_index]
+                # Fuse all masks into one
+                fused_mask = fuse_masks(masks)
 
-                # Save the mask
-                mask_image = (best_mask * 255).astype(np.uint8)
-                mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
+                # Save the fused mask
+                mask_image = (fused_mask * 255).astype(np.uint8)
+                mask_filename = f"{output_dir}\\{image_file}_fused.png"
                 cv2.imwrite(mask_filename, mask_image)
-                logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
-        else:
-            masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
-
-            # In this case, results are on GPU, getting them back
-            masks = masks.cpu().numpy()
-            scores = scores.cpu().numpy()
-            logits = logits.cpu().numpy()
-            
-            # Skip if no masks or scores found
-            if masks.size == 0 or scores.size == 0:
-                logging.warning(f"No masks or scores found for box {idx}. Skipping.")
-                continue
-
-            fused_mask = fuse_masks(masks)
- 
-            # Save the fused mask
-            mask_image = (fused_mask * 255).astype(np.uint8)
-            mask_filename = f"{output_dir}\\{image_file}.png"
-            cv2.imwrite(mask_filename, mask_image)
-            logging.info(f"Saved fused mask {mask_filename}")
+                logging.info(f"Saved fused mask {mask_filename}")
+        except Exception as e:
+            logging.error(f"An error occurred while processing {image_file}: {e}")
+            continue  # Skip to the next image in case of an error
