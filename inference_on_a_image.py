@@ -256,37 +256,38 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # cfg
-    config_file = args.config_file
-    checkpoint_path = args.checkpoint_path
-    image_dir = args.image_dir
+    config_file = Path(args.config_file)
+    checkpoint_path = Path(args.checkpoint_path)
+    image_dir = Path(args.image_dir)
     text_prompt = args.text_prompt
-    output_dir = args.output_dir
+    output_dir = Path(args.output_dir)
     box_threshold = args.box_threshold
     text_threshold = args.text_threshold
     token_spans = args.token_spans
-    sam_checkpoint_path = args.sam_checkpoint_path
+    sam_checkpoint_path = Path(args.sam_checkpoint_path)
     sam_checkpoint_type = args.sam_checkpoint_type
 
     # make dir
-    os.makedirs(output_dir, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Check if the provided path is a directory
-    if not os.path.isdir(image_dir):
+    if not image_dir.is_dir():
         raise ValueError(f"The provided path {image_dir} is not a directory.")
 
     # List all image files in the directory
-    image_files = [f for f in os.listdir(image_dir) if os.path.isfile(os.path.join(image_dir, f))]
+    image_files = [f.name for f in image_dir.iterdir() if f.is_file()]
 
-    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path).to(DEVICE)
+    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path.as_posix()).to(DEVICE)
     predictor = SamPredictor(sam)
 
     for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
         try:
-            image_path = os.path.join(image_dir, image_file)
+            image_path = image_dir / image_file
+
             # load image
             image_pil, image = load_image(image_path)
             # load model
-            model = load_model(config_file, checkpoint_path, cpu_only=args.cpu_only)
+            model = load_model(config_file.as_posix(), checkpoint_path.as_posix(), cpu_only=args.cpu_only)
 
             # set the text_threshold to None if token_spans is set.
             if token_spans is not None:
@@ -329,8 +330,8 @@ if __name__ == "__main__":
 
                     # Save the mask
                     mask_image = (best_mask * 255).astype(np.uint8)
-                    mask_filename = f"{output_dir}\\{image_file}_box_{idx}.png"  # Unique name for each box
-                    cv2.imwrite(mask_filename, mask_image)
+                    mask_filename = output_dir / f"{image_file}_box_{idx}.png"  # Unique name for each box
+                    cv2.imwrite(mask_filename.as_posix(), mask_image)
                     logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
             else:
                 masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
@@ -350,8 +351,8 @@ if __name__ == "__main__":
 
                 # Save the fused mask
                 mask_image = (fused_mask * 255).astype(np.uint8)
-                mask_filename = f"{output_dir}\\{image_file}.png"
-                cv2.imwrite(mask_filename, mask_image)
+                mask_filename = output_dir / f"{image_file}.png"
+                cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
         except Exception as e:
             logging.error(f"An error occurred while processing {image_file}: {e}")
