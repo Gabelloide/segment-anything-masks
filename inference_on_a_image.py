@@ -330,7 +330,7 @@ if __name__ == "__main__":
 
                     # Save the mask
                     mask_image = (best_mask * 255).astype(np.uint8)
-                    mask_filename = output_dir / f"{image_file}_box_{idx}.png"  # Unique name for each box
+                    mask_filename = output_dir / f"{Path(image_file).stem}_box_{idx}.png"  # Unique name for each box
                     cv2.imwrite(mask_filename.as_posix(), mask_image)
                     logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
             else:
@@ -351,7 +351,7 @@ if __name__ == "__main__":
 
                 # Save the fused mask
                 mask_image = (fused_mask * 255).astype(np.uint8)
-                mask_filename = output_dir / f"{image_file}.png"
+                mask_filename = output_dir / f"{Path(image_file).stem}.png"
                 cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
         except Exception as e:
