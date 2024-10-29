@@ -1,0 +1,102 @@
+# Cuda 12.1
+FROM nvidia/cuda:12.1.1-cudnn8-devel-ubuntu20.04
+
+# Set non-interactive frontend for APT
+ENV DEBIAN_FRONTEND=noninteractive
+
+# System
+RUN apt-get update && apt-get install -y \
+    cmake \
+    git \
+    nano \
+    gcc \
+    g++ \
+    imagemagick \
+    ffmpeg \
+    wget \
+    bzip2 \
+    libglew-dev \
+    libassimp-dev \
+    libboost-all-dev \
+    libgtk-3-dev \
+    libopencv-dev \
+    libglfw3-dev \
+    libavdevice-dev \
+    libavcodec-dev \
+    libeigen3-dev \
+    libxxf86vm-dev \
+    libembree-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Miniconda
+RUN wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    bash Miniconda3-latest-Linux-x86_64.sh -b -p /opt/conda && \
+    rm Miniconda3-latest-Linux-x86_64.sh && \
+    /opt/conda/bin/conda clean --all --yes
+
+# Conda to path
+ENV PATH /opt/conda/bin:$PATH
+
+# Clone repo
+RUN git clone --recursive https://github.com/graphdeco-inria/hierarchical-3d-gaussians.git
+
+# Conda env
+RUN conda create -n hierarchical_3d_gaussians python=3.12 -y && \
+    echo "source activate hierarchical_3d_gaussians" > ~/.bashrc
+ENV PATH /opt/conda/envs/hierarchical_3d_gaussians/bin:$PATH
+
+# CUDA 
+ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV CUDA_HOME=/usr/local/cuda \
+     TORCH_CUDA_ARCH_LIST="6.0 6.1 7.0 7.5 8.0 8.6+PTX"
+
+# Python dependencies
+RUN pip install torch==2.3.0 torchvision==0.18.0 torchaudio==2.3.0 --index-url https://download.pytorch.org/whl/cu121 \
+    && pip install ninja wheel \
+    && cd hierarchical-3d-gaussians \
+    && pip install -r requirements.txt
+
+# Compile Submodules
+RUN cd hierarchical-3d-gaussians/submodules/gaussianhierarchy && \
+    cmake . -B build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build build -j --config Release && \
+    cd ../../..
+
+# Download depth checkpoint in hierarchical-3d-gaussians/submodules/Depth-Anything-V2/checkpoints
+RUN mkdir -p hierarchical-3d-gaussians/submodules/Depth-Anything-V2/checkpoints \
+    && wget https://huggingface.co/depth-anything/Depth-Anything-V2-Large/resolve/main/depth_anything_v2_vitl.pth?download=true -O hierarchical-3d-gaussians/submodules/Depth-Anything-V2/checkpoints/depth_anything_v2_vitl.pth
+
+# Install COLMAP dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libboost-program-options-dev \
+    libboost-filesystem-dev \
+    libboost-graph-dev \
+    libboost-system-dev \
+    libboost-test-dev \
+    libeigen3-dev \
+    libsuitesparse-dev \
+    libfreeimage-dev \
+    libgoogle-glog-dev \
+    libgflags-dev \
+    libglew-dev \
+    qtbase5-dev \
+    libqt5opengl5-dev \
+    libcgal-dev \
+    libatlas-base-dev \
+    libsuitesparse-dev \
+    libmetis-dev \
+    libflann-dev \
+    libsqlite3-dev \
+    libceres-dev
+
+# Clone COLMAP repository
+RUN git clone https://github.com/colmap/colmap.git
+
+RUN cd /colmap \
+    && mkdir build \
+    && cd build \
+    && cmake -DCMAKE_CUDA_COMPILER=/usr/local/cuda/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES="75;80;86;87;90" .. \
+    && make -j8 \
+    && make install
+
+
