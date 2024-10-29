@@ -252,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--split_masks", "-s", action="store_true", default=False, help="Create one mask per detected subject in the image")
     parser.add_argument("--sam_checkpoint_path", "-g", type=str, default="sam_vit_h.pth", help="path to the sam model checkpoint")
     parser.add_argument("--sam_checkpoint_type", "-y", type=str, default="vit_h", help="type of the sam model checkpoint : [vit_b, vit_h, vit_l]")
+    parser.add_argument("--invert", "-i", action="store_true", default=False, help="Saves the mask in an inverted form (white/black inverted)")
 
     args = parser.parse_args()
     
@@ -330,6 +331,10 @@ if __name__ == "__main__":
 
                     # Save the mask
                     mask_image = (best_mask * 255).astype(np.uint8)
+
+                    if args.invert:
+                        mask_image = 255 - mask_image
+
                     mask_filename = output_dir / f"{Path(image_file).stem}_box_{idx}.png"  # Unique name for each box
                     cv2.imwrite(mask_filename.as_posix(), mask_image)
                     logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
@@ -352,6 +357,10 @@ if __name__ == "__main__":
                 # Save the fused mask
                 mask_image = (fused_mask * 255).astype(np.uint8)
                 mask_filename = output_dir / f"{Path(image_file).stem}.png"
+
+                if args.invert:
+                    mask_image = 255 - mask_image
+
                 cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
         except Exception as e:
