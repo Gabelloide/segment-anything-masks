@@ -14,7 +14,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg x264 x265 \
     git aria2 \
     nano \
-    fonts-noto-cjk fonts-noto-color-emoji \
     libgl1-mesa-glx libglib2.0-0 \
     libavcodec-extra \
     && curl -sS https://bootstrap.pypa.io/get-pip.py -o get-pip.py \
