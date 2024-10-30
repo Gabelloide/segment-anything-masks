@@ -1,7 +1,4 @@
 import argparse
-import os
-import sys
-
 import cv2
 import numpy as np
 import torch
@@ -52,6 +49,15 @@ def plot_boxes_to_image(image_pil, tgt):
         # draw
         x0, y0, x1, y1 = box
         x0, y0, x1, y1 = int(x0), int(y0), int(x1), int(y1)
+        
+        # Edit coordinates regarding box_margin if set
+        if args.box_margin is not None and args.box_margin != 0:
+          
+          image_width, image_height = image_pil.size
+          x0 = max(0, x0 - args.box_margin)
+          y0 = max(0, y0 - args.box_margin)
+          x1 = min(image_width, x1 + args.box_margin)
+          y1 = min(image_height, y1 + args.box_margin)
         
         draw.rectangle([x0, y0, x1, y1], outline=color, width=6)
         # draw.text((x0, y0), str(label), fill=color)
@@ -109,7 +115,7 @@ def load_image(image_path):
     return image_pil, image
 
 
-def load_model(model_config_path, model_checkpoint_path, cpu_only=False):
+def load_groundingdino_model(model_config_path, model_checkpoint_path, cpu_only=False):
     args = SLConfig.fromfile(model_config_path)
     args.device = "cuda" if not cpu_only else "cpu"
     model = build_model(args)
@@ -221,21 +227,95 @@ def get_grounding_output(model, image, caption, box_threshold, text_threshold=No
                 all_phrases.extend([phrase for _ in range(len(filt_mask))])
         boxes_filt = torch.cat(all_boxes, dim=0).cpu()
         pred_phrases = all_phrases
-
-
     return boxes_filt, pred_phrases
 
 
 def fuse_masks(masks):
     """Fuses multiple masks into a single mask."""
     fused_mask = np.zeros_like(masks[0][0], dtype=np.uint8)
-
     for i in range(masks.shape[0]):
         for j in range(masks.shape[1]):
             mask = masks[i][j]
             fused_mask = np.maximum(fused_mask, mask)
-
     return fused_mask
+
+
+def fuse_boxes_masks(masks):
+    """Fuses multiple masks into a single mask."""
+    fused_mask = np.zeros((masks.shape[1], masks.shape[2]), dtype=np.uint8)
+    for mask in masks:
+        fused_mask = np.maximum(fused_mask, mask)
+    return fused_mask
+
+
+def load_models(dino_config_file, dino_checkpoint_path, sam_checkpoint_path, sam_checkpoint_type, cpu_only=False):
+    """Load GroundingDINO and SAM models."""
+    model = load_groundingdino_model(dino_config_file, dino_checkpoint_path, cpu_only)
+    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path).to(DEVICE)
+    predictor = SamPredictor(sam)
+    return model, predictor
+
+
+def get_boxes(image_path, model, predictor, text_prompt, box_threshold, text_threshold=None, token_spans=None, split_masks=False):
+    """Run GroundingDINO to get the boxes around the subjects in the image."""
+    image_pil, image = load_image(image_path)
+    image_width, image_height = image_pil.size
+    # set the text_threshold to None if token_spans is set.
+    if token_spans is not None:
+      text_threshold = None
+      logging.info("Using token_spans. Set the text_threshold to None.")
+      
+    boxes_filt, pred_phrases = get_grounding_output(
+    model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
+    )
+
+    # visualize pred
+    size = image_pil.size
+    pred_dict = {
+    "boxes": boxes_filt,
+    "size": [size[1], size[0]],  # H,W
+    "labels": pred_phrases,
+    }
+
+    box_coords = get_box_from_image(pred_dict)
+
+    # Apply margin on each box if needed
+    if args.generate_box:
+        box_coords = apply_margin_on_boxes(box_coords, args.box_margin, image_width, image_height)
+    return box_coords
+
+
+def apply_margin_on_boxes(box_coords, margin, image_width=256, image_height=256):
+    """Apply a margin around the detected object in the image."""
+    new_box_coords = []
+    for box in box_coords:
+        x0, y0, x1, y1 = box
+        
+        x0 = max(0, x0 - margin)
+        y0 = max(0, y0 - margin)
+        x1 = min(image_width, x1 + margin)
+        y1 = min(image_height, y1 + margin)
+        
+        new_box_coords.append([x0, y0, x1, y1])
+    return new_box_coords
+
+
+def create_masks_from_box(box_coords, image_path, invert=False, split=False):
+    """Create masks from the provided box coordinates
+    Returns a numpy array of masks."""
+    image = cv2.imread(image_path)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    masks = []
+    for box in box_coords:
+        mask = np.zeros(image.shape[:2], dtype=np.uint8)
+        x0, y0, x1, y1 = box
+        mask[y0:y1, x0:x1] = 255
+        if invert:
+            mask = 255 - mask
+        masks.append(mask)
+    masks = np.array(masks)
+    # Make three channels
+    return np.array(masks)
 
 
 if __name__ == "__main__":
@@ -253,6 +333,9 @@ if __name__ == "__main__":
     parser.add_argument("--sam_checkpoint_path", "-g", type=str, default="sam_vit_h.pth", help="path to the sam model checkpoint")
     parser.add_argument("--sam_checkpoint_type", "-y", type=str, default="vit_h", help="type of the sam model checkpoint : [vit_b, vit_h, vit_l]")
     parser.add_argument("--invert", "-i", action="store_true", default=False, help="Saves the mask in an inverted form (white/black inverted)")
+    parser.add_argument("--generate_box", "-b", action="store_true", default=False, help="Generate mask as a box around the detected object")
+    # Box margin, only if generate_box is True
+    parser.add_argument("--box_margin", "-a", type=int, default=0, help="Margin in pixels around the detected object to generate the box mask")
 
     args = parser.parse_args()
     
@@ -278,42 +361,31 @@ if __name__ == "__main__":
     # List all image files in the directory
     image_files = [f.name for f in image_dir.iterdir() if f.is_file()]
 
-    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path.as_posix()).to(DEVICE)
-    predictor = SamPredictor(sam)
+    model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam_checkpoint_path.as_posix(), sam_checkpoint_type, cpu_only=args.cpu_only)
 
-    for i, image_file in tqdm(enumerate(image_files), total=len(image_files), desc="Processing images"):
+    for image_file in tqdm(image_files, desc="Processing images"):
         try:
             image_path = image_dir / image_file
+            # Get the masks
+            box_coords = get_boxes(image_path, model, predictor, text_prompt, box_threshold, text_threshold, token_spans, split_masks=args.split_masks)
 
-            # load image
-            image_pil, image = load_image(image_path)
-            # load model
-            model = load_model(config_file.as_posix(), checkpoint_path.as_posix(), cpu_only=args.cpu_only)
-
-            # set the text_threshold to None if token_spans is set.
-            if token_spans is not None:
-                text_threshold = None
-                logging.info("Using token_spans. Set the text_threshold to None.")
-
-            # run model
-            boxes_filt, pred_phrases = get_grounding_output(
-                model, image, text_prompt, box_threshold, text_threshold, cpu_only=args.cpu_only, token_spans=eval(f"{token_spans}")
-            )
-            
-            # visualize pred
-            size = image_pil.size
-            pred_dict = {
-                "boxes": boxes_filt,
-                "size": [size[1], size[0]],  # H,W
-                "labels": pred_phrases,
-            }
-
-            box_coords = get_box_from_image(pred_dict)
-
-            # Creating one mask for each box if args.split_masks is True
+            # ------------- SPLITTING ----------------
             if args.split_masks:
-                results = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=False)
+              # ------------- BOX GENERATION ----------------
+              if args.generate_box:
+                masks = create_masks_from_box(box_coords, image_path, invert=args.invert, split=True)
+                for idx, mask in enumerate(masks):
+                    mask_filename = output_dir / f"{Path(image_file).stem}_box_{idx}.png"
+                    
+                    if args.invert:
+                      masks = 255 - masks
+                    
+                    cv2.imwrite(mask_filename.as_posix(), mask)
+                    logging.info(f"Saved box mask at : {mask_filename}")
 
+              # ------------- SAM MASK GENERATION ----------------
+              else:
+                results = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=False)
                 # For each box, there are three masks, we will save the best one for each one.
                 for idx, result in results.items():
                     masks = result['masks']
@@ -338,7 +410,26 @@ if __name__ == "__main__":
                     mask_filename = output_dir / f"{Path(image_file).stem}_box_{idx}.png"  # Unique name for each box
                     cv2.imwrite(mask_filename.as_posix(), mask_image)
                     logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
+                    
+            # ------------- NO SPLITTING ----------------
             else:
+              # ------------- BOX GENERATION ----------------
+              if args.generate_box:
+                masks = create_masks_from_box(box_coords, image_path, invert=args.invert, split=False)
+                fused_mask = fuse_boxes_masks(masks)
+                
+                if args.invert:
+                    # TODO FIX INVERT for fused mask with boxes
+                    print("Invert not implemented for fused mask with boxes. (invert option is ignored)")
+                    
+                
+                # Save the fused mask
+                mask_filename = output_dir / f"{Path(image_file).stem}.png"
+                cv2.imwrite(mask_filename.as_posix(), fused_mask)
+                logging.info(f"Saved fused mask {mask_filename}")
+              
+              # ------------- SAM MASK GENERATION ----------------
+              else:
                 masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
 
                 # In this case, results are on GPU, getting them back
@@ -363,6 +454,7 @@ if __name__ == "__main__":
 
                 cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
+
         except Exception as e:
             logging.error(f"An error occurred while processing {image_file}: {e}")
             continue  # Skip to the next image in case of an error
