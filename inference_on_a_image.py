@@ -23,9 +23,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
-# Constants
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 def plot_boxes_to_image(image_pil, tgt):
     H, W = tgt["size"]
@@ -350,6 +347,9 @@ if __name__ == "__main__":
     token_spans = args.token_spans
     sam_checkpoint_path = Path(args.sam_checkpoint_path)
     sam_checkpoint_type = args.sam_checkpoint_type
+
+    # Device
+    DEVICE = "cuda" if torch.cuda.is_available() and not args.cpu_only else "cpu"
 
     # make dir
     output_dir.mkdir(parents=True, exist_ok=True)
