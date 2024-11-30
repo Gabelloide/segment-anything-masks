@@ -70,6 +70,7 @@ COPY GroundingDINO_SwinT_OGC.py /configs/
 
 # Copy main code
 COPY inference_on_a_image.py /
+COPY blackout_an_object_on_image.py /
 COPY run.sh /
 RUN chmod +x run.sh
 
