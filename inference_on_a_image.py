@@ -253,7 +253,7 @@ def load_models(dino_config_file, dino_checkpoint_path, sam_checkpoint_path, sam
     return model, predictor
 
 
-def get_boxes(image_path, model, predictor, text_prompt, box_threshold, text_threshold=None, token_spans=None, split_masks=False):
+def get_boxes(image_path, model, text_prompt, box_threshold, text_threshold=None, token_spans=None):
     """Run GroundingDINO to get the boxes around the subjects in the image."""
     image_pil, image = load_image(image_path)
     image_width, image_height = image_pil.size
@@ -367,7 +367,7 @@ if __name__ == "__main__":
         try:
             image_path = image_dir / image_file
             # Get the masks
-            box_coords = get_boxes(image_path, model, predictor, text_prompt, box_threshold, text_threshold, token_spans, split_masks=args.split_masks)
+            box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
 
             # ------------- SPLITTING ----------------
             if args.split_masks:
