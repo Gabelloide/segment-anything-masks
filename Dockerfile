@@ -38,6 +38,10 @@ RUN python3.11 -m venv /python_venv \
     && pip3 install git+https://github.com/facebookresearch/segment-anything.git \
     && deactivate
 
+# VENV
+ENV VIRTUAL_ENV=/python_venv
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
 # CUDA 
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
 ENV CUDA_HOME=/usr/local/cuda \
