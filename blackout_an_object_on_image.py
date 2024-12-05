@@ -228,7 +228,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", "-o", type=str, default="outputs", required=True, help="output directory")
     parser.add_argument("--box_threshold", type=float, default=0.3, help="box threshold")
     parser.add_argument("--text_threshold", type=float, default=0.25, help="text threshold")
-    parser.add_argument("--token_spans", type=str, default=None, help="The positions of start and end positions of phrases of interest.")
+    parser.add_argument("--token_spans", type=str, default=None, help=
+                        "The positions of start and end positions of phrases of interest. \
+                        For example, a caption is 'a cat and a dog', \
+                        if you would like to detect 'cat', the token_spans should be '[[[2, 5]], ]', since 'a cat and a dog'[2:5] is 'cat'. \
+                        if you would like to detect 'a cat', the token_spans should be '[[[0, 1], [2, 5]], ]', since 'a cat and a dog'[0:1] is 'a', and 'a cat and a dog'[2:5] is 'cat'. \
+                        ")
     parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!", default=False)
     parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
@@ -236,6 +241,8 @@ if __name__ == "__main__":
     parser.add_argument("--sam_checkpoint_type", "-y", type=str, default="vit_h", help="type of the sam model checkpoint : [vit_b, vit_h, vit_l]")
     
     parser.add_argument("--keepObject", "-k", action="store_true", default=False, help="If specified, the prompted object will be kept and the rest will be blacked out.")
+    parser.add_argument("--saveMask", "-s", action="store_true", default=False, help="If specified, will save the mask that was used to black out the object")
+
 
     args = parser.parse_args()
     
@@ -267,46 +274,53 @@ if __name__ == "__main__":
     model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam_checkpoint_path.as_posix(), sam_checkpoint_type, cpu_only=args.cpu_only)
 
     for image_file in tqdm(image_files, desc="Processing images"):
-        try:
-            image_path = image_dir / image_file
-            # Get the masks
-            box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
+        # try:
+        image_path = image_dir / image_file
+        # Get the masks
+        box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
 
-              # ------------- SAM MASK GENERATION ----------------
-            masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+            # ------------- SAM MASK GENERATION ----------------
+        masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
 
-            # In this case, results are on GPU, getting them back
-            masks = masks.cpu().numpy()
-            scores = scores.cpu().numpy()
-            logits = logits.cpu().numpy()
-            
-            # Skip if no masks or scores found
-            if masks.size == 0 or scores.size == 0:
-                logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
-                continue
-
-            # Fuse all masks into one
-            fused_mask = fuse_masks(masks)
-
-            # Save the fused mask
-            mask_image = (fused_mask * 255).astype(np.uint8)
-
-            if not args.keepObject: # If the object is not to be kept, invert the mask so the object is actually white in the mask, not black, resulting in blacking out the object.
-                mask_image = 255 - mask_image
-                
-                
-            # Apply mask to the image
-            image = cv2.imread(image_path.as_posix())
-            # Get the mask as cv2 image
-            mask = cv2.cvtColor(mask_image, cv2.COLOR_GRAY2BGR)
-            # Apply the mask
-            masked_image = cv2.bitwise_and(image, mask)
+        # In this case, results are on GPU, getting them back
+        masks = masks.cpu().numpy()
+        scores = scores.cpu().numpy()
+        logits = logits.cpu().numpy()
         
-            # Save the masked image
-            masked_image_filename = output_dir / f"{Path(image_file).stem}.png"
-            cv2.imwrite(masked_image_filename.as_posix(), masked_image)
-            logging.info(f"Saved fused image {masked_image_filename}")
+        # Skip if no masks or scores found
+        if masks.size == 0 or scores.size == 0:
+            logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
+            continue
 
-        except Exception as e:
-            logging.error(f"An error occurred while processing {image_file}: {e}")
-            continue  # Skip to the next image in case of an error
+        # Fuse all masks into one
+        fused_mask = fuse_masks(masks)
+
+        # Save the fused mask
+        mask_image = (fused_mask * 255).astype(np.uint8)
+
+        if not args.keepObject: # If the object is not to be kept, invert the mask so the object is actually white in the mask, not black, resulting in blacking out the object.
+            mask_image = 255 - mask_image
+            
+            
+        # Apply mask to the image
+        image = cv2.imread(image_path.as_posix())
+        # Get the mask as cv2 image
+        mask = cv2.cvtColor(mask_image, cv2.COLOR_GRAY2BGR)
+        # Apply the mask
+        masked_image = cv2.bitwise_and(image, mask)
+    
+        # Save the masked image
+        masked_image_filename = output_dir / f"{Path(image_file).stem}.png"
+        cv2.imwrite(masked_image_filename.as_posix(), masked_image)
+        logging.info(f"Saved fused image {masked_image_filename}")
+
+        if args.saveMask:
+            # Also save the mask
+            mask_filename = output_dir / f"{Path(image_file).stem}_mask.png"
+            cv2.imwrite(mask_filename.as_posix(), mask_image)
+            logging.info(f"Saved associated mask {masked_image_filename}")
+
+
+        # except Exception as e:
+        #     logging.error(f"An error occurred while processing {image_file}: {e}")
+        #     continue  # Skip to the next image in case of an error

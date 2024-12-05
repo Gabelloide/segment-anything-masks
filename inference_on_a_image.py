@@ -322,7 +322,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", "-o", type=str, default="outputs", required=True, help="output directory")
     parser.add_argument("--box_threshold", type=float, default=0.3, help="box threshold")
     parser.add_argument("--text_threshold", type=float, default=0.25, help="text threshold")
-    parser.add_argument("--token_spans", type=str, default=None, help="The positions of start and end positions of phrases of interest.")
+    parser.add_argument("--token_spans", type=str, default=None, help=
+                        "The positions of start and end positions of phrases of interest. \
+                        For example, a caption is 'a cat and a dog', \
+                        if you would like to detect 'cat', the token_spans should be '[[[2, 5]], ]', since 'a cat and a dog'[2:5] is 'cat'. \
+                        if you would like to detect 'a cat', the token_spans should be '[[[0, 1], [2, 5]], ]', since 'a cat and a dog'[0:1] is 'a', and 'a cat and a dog'[2:5] is 'cat'. \
+                        ")
     parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!", default=False)
     parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
