@@ -374,7 +374,7 @@ if __name__ == "__main__":
     model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam2_checkpoint_path.as_posix(), sam2_config_file, cpu_only=args.cpu_only)
 
     for image_file in tqdm(image_files, desc="Processing images"):
-        # try:
+        try:
             image_path = image_dir / image_file
             # Get the masks
             box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
@@ -463,6 +463,6 @@ if __name__ == "__main__":
                 cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved fused mask {mask_filename}")
 
-        # except Exception as e:
-        #     logging.error(f"An error occurred while processing {image_file}: {e}")
-        #     continue  # Skip to the next image in case of an error
+        except Exception as e:
+            logging.error(f"An error occurred while processing {image_file}: {e}")
+            continue  # Skip to the next image in case of an error
