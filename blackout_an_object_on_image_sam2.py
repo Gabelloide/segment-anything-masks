@@ -290,11 +290,6 @@ if __name__ == "__main__":
             if len(box_coords) != 0 :
                 # ------------- SAM MASK GENERATION ----------------
                 masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
-
-                # In this case, results are on GPU, getting them back
-                masks = masks.cpu().numpy()
-                scores = scores.cpu().numpy()
-                logits = logits.cpu().numpy()
                 
                 # Skip if no masks or scores found
                 if masks.size == 0 or scores.size == 0:
