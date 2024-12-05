@@ -23,6 +23,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
+# Disable logging for cleaner print (uncomment)
+logging.disable(logging.CRITICAL)
 
 def get_box_from_image(tgt):
   """Returns the box coordinates from the target dictionary that was computed by GroundingDINO."""
@@ -325,7 +327,6 @@ if __name__ == "__main__":
                 mask_filename = output_dir / f"{Path(image_file).stem}_mask.png"
                 cv2.imwrite(mask_filename.as_posix(), mask_image)
                 logging.info(f"Saved associated mask {masked_image_filename}")
-
 
         except Exception as e:
             logging.error(f"An error occurred while processing {image_file}: {e}")
