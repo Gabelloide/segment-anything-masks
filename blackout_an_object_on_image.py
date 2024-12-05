@@ -2,7 +2,7 @@ import argparse
 import cv2
 import numpy as np
 import torch
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 from pathlib import Path
 import logging
 import warnings
