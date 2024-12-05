@@ -73,8 +73,8 @@ def load_groundingdino_model(model_config_path, model_checkpoint_path, cpu_only=
     return model
 
 
-def create_sam_mask(box_coordinates, image_path, sam_predictor, multiple_boxes=False):
-    """Computes SAM masks for a given image and box coordinates.
+def create_sam_mask(box_coordinates: list, image_path, sam_predictor, multiple_boxes=False):
+    """Computes SAM masks for a given image and box coordinates. The box_coordinates list is considered not empty to compute a mask.
     If multiple boxes are provided, the function will return several masks and scores.
     SAM is creating 3 masks for each box.
     If multiple_boxes is True, will combine all boxes in one image to compute only 3 masks."""
@@ -82,7 +82,7 @@ def create_sam_mask(box_coordinates, image_path, sam_predictor, multiple_boxes=F
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     sam_predictor.set_image(image)
-
+    
     if not multiple_boxes:
         # Future results
         results = {}
@@ -274,53 +274,59 @@ if __name__ == "__main__":
     model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam_checkpoint_path.as_posix(), sam_checkpoint_type, cpu_only=args.cpu_only)
 
     for image_file in tqdm(image_files, desc="Processing images"):
-        # try:
-        image_path = image_dir / image_file
-        # Get the masks
-        box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
+        try:
+            image_path = image_dir / image_file
+            # Get the masks
+            box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
 
-            # ------------- SAM MASK GENERATION ----------------
-        masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+            # Loading the original image for later
+            input_image = cv2.imread(image_path.as_posix())
 
-        # In this case, results are on GPU, getting them back
-        masks = masks.cpu().numpy()
-        scores = scores.cpu().numpy()
-        logits = logits.cpu().numpy()
+            # If boxes are found, creating masks using SAM
+            if len(box_coords) != 0 :
+                # ------------- SAM MASK GENERATION ----------------
+                masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+
+                # In this case, results are on GPU, getting them back
+                masks = masks.cpu().numpy()
+                scores = scores.cpu().numpy()
+                logits = logits.cpu().numpy()
+                
+                # Skip if no masks or scores found
+                if masks.size == 0 or scores.size == 0:
+                    logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
+                    continue
+
+                # Fuse all masks into one
+                fused_mask = fuse_masks(masks)
+
+                # Save the fused mask as an image object
+                mask_image = (fused_mask * 255).astype(np.uint8)
+
+            # No boxes are found, generating a blank mask (nothing to mask)
+            else:
+                height, width = input_image.shape[:2]
+                mask_image = np.zeros((height, width), dtype=np.uint8) * 255
+
+            if not args.keepObject: # If the object is not to be kept, invert the mask so the object is actually white in the mask, not black, resulting in keeping the object only in the final image.
+                mask_image = 255 - mask_image
+                
+            # Apply mask to the image
+            mask = cv2.cvtColor(mask_image, cv2.COLOR_GRAY2BGR)
+            masked_image = cv2.bitwise_and(input_image, mask)
         
-        # Skip if no masks or scores found
-        if masks.size == 0 or scores.size == 0:
-            logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
-            continue
+            # Save the masked image
+            masked_image_filename = output_dir / f"{Path(image_file).stem}.png"
+            cv2.imwrite(masked_image_filename.as_posix(), masked_image)
+            logging.info(f"Saved fused image {masked_image_filename}")
 
-        # Fuse all masks into one
-        fused_mask = fuse_masks(masks)
-
-        # Save the fused mask
-        mask_image = (fused_mask * 255).astype(np.uint8)
-
-        if not args.keepObject: # If the object is not to be kept, invert the mask so the object is actually white in the mask, not black, resulting in blacking out the object.
-            mask_image = 255 - mask_image
-            
-            
-        # Apply mask to the image
-        image = cv2.imread(image_path.as_posix())
-        # Get the mask as cv2 image
-        mask = cv2.cvtColor(mask_image, cv2.COLOR_GRAY2BGR)
-        # Apply the mask
-        masked_image = cv2.bitwise_and(image, mask)
-    
-        # Save the masked image
-        masked_image_filename = output_dir / f"{Path(image_file).stem}.png"
-        cv2.imwrite(masked_image_filename.as_posix(), masked_image)
-        logging.info(f"Saved fused image {masked_image_filename}")
-
-        if args.saveMask:
-            # Also save the mask
-            mask_filename = output_dir / f"{Path(image_file).stem}_mask.png"
-            cv2.imwrite(mask_filename.as_posix(), mask_image)
-            logging.info(f"Saved associated mask {masked_image_filename}")
+            if args.saveMask:
+                # Also save the mask
+                mask_filename = output_dir / f"{Path(image_file).stem}_mask.png"
+                cv2.imwrite(mask_filename.as_posix(), mask_image)
+                logging.info(f"Saved associated mask {masked_image_filename}")
 
 
-        # except Exception as e:
-        #     logging.error(f"An error occurred while processing {image_file}: {e}")
-        #     continue  # Skip to the next image in case of an error
+        except Exception as e:
+            logging.error(f"An error occurred while processing {image_file}: {e}")
+            continue  # Skip to the next image in case of an error
