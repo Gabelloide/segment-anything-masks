@@ -23,6 +23,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Ignore warnings
 warnings.filterwarnings("ignore")
 
+# Disable logging for cleaner print (uncomment)
+# logging.disable(logging.CRITICAL)
 
 def plot_boxes_to_image(image_pil, tgt):
     H, W = tgt["size"]
