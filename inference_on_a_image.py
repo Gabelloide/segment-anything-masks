@@ -297,7 +297,7 @@ def apply_margin_on_boxes(box_coords, margin, image_width=256, image_height=256)
     return new_box_coords
 
 
-def create_masks_from_box(box_coords, image_path, invert=False, split=False):
+def create_masks_from_box(box_coords: list, image_path, invert=False, split=False):
     """Create masks from the provided box coordinates
     Returns a numpy array of masks."""
     image = cv2.imread(image_path)
@@ -373,6 +373,9 @@ if __name__ == "__main__":
             image_path = image_dir / image_file
             # Get the masks
             box_coords = get_boxes(image_path, model, text_prompt, box_threshold, text_threshold, token_spans)
+
+            if len(box_coords) == 0:
+                logging.warning(f"No boxes found for prompt {text_prompt} in {image_path}. Skipping.")
 
             # ------------- SPLITTING ----------------
             if args.split_masks:
