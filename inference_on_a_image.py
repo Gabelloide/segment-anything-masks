@@ -329,7 +329,7 @@ if __name__ == "__main__":
                         if you would like to detect 'a cat', the token_spans should be '[[[0, 1], [2, 5]], ]', since 'a cat and a dog'[0:1] is 'a', and 'a cat and a dog'[2:5] is 'cat'. \
                         ")
     parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!", default=False)
-    parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
+    parser.add_argument("--config_file", "-c", type=str, default="config_files/GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
     parser.add_argument("--split_masks", "-s", action="store_true", default=False, help="Create one mask per detected subject in the image")
     parser.add_argument("--sam_checkpoint_path", "-g", type=str, default="sam_vit_h.pth", help="path to the sam model checkpoint")
