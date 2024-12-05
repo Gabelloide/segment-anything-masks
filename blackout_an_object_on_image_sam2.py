@@ -85,7 +85,7 @@ def create_sam_mask(box_coordinates: list, image_path, sam_predictor, multiple_b
     image = cv2.imread(image_path)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     sam_predictor.set_image(image)
-    
+
     if not multiple_boxes:
         # Future results
         results = {}
@@ -106,12 +106,10 @@ def create_sam_mask(box_coordinates: list, image_path, sam_predictor, multiple_b
             }
         return results
     else:
-        input_boxes = torch.tensor(box_coordinates, device=DEVICE)
-        transformed_boxes = sam_predictor.transform.apply_boxes_torch(input_boxes, image.shape[:2])
-        masks, scores, logits = sam_predictor.predict_torch(
+        masks, scores, logits = sam_predictor.predict(
             point_coords=None,
             point_labels=None,
-            boxes=transformed_boxes,
+            box=box_coordinates,
             multimask_output=True,
         )
         return masks, scores, logits
@@ -190,11 +188,13 @@ def fuse_masks(masks):
     return fused_mask
 
 
-def load_models(dino_config_file, dino_checkpoint_path, sam_checkpoint_path, sam_checkpoint_type, cpu_only=False):
+def load_models(dino_config_file, dino_checkpoint_path, sam2_checkpoint_path, sam2_config_file, cpu_only=False):
     """Load GroundingDINO and SAM models."""
     model = load_groundingdino_model(dino_config_file, dino_checkpoint_path, cpu_only)
-    sam = sam_model_registry[sam_checkpoint_type](checkpoint=sam_checkpoint_path).to(DEVICE)
-    predictor = SamPredictor(sam)
+    device = "cuda" if not cpu_only else "cpu"
+    print(sam2_config_file)
+    sam2_model = build_sam2(sam2_config_file, sam2_checkpoint_path, device=device)
+    predictor = SAM2ImagePredictor(sam2_model)
     return model, predictor
 
 
@@ -238,11 +238,12 @@ if __name__ == "__main__":
                         if you would like to detect 'a cat', the token_spans should be '[[[0, 1], [2, 5]], ]', since 'a cat and a dog'[0:1] is 'a', and 'a cat and a dog'[2:5] is 'cat'. \
                         ")
     parser.add_argument("--cpu-only", action="store_true", help="running on cpu only!", default=False)
-    parser.add_argument("--config_file", "-c", type=str, default="GroundingDINO_SwinT_OGC.py", help="path to the model config file")
+    parser.add_argument("--config_file", "-c", type=str, default="config_files/GroundingDINO_SwinT_OGC.py", help="path to the model config file")
     parser.add_argument("--checkpoint_path", "-m", type=str, default="groundingdino_swint_ogc.pth", help="path to the model checkpoint")
-    parser.add_argument("--sam_checkpoint_path", "-g", type=str, default="sam_vit_h.pth", help="path to the sam model checkpoint")
-    parser.add_argument("--sam_checkpoint_type", "-y", type=str, default="vit_h", help="type of the sam model checkpoint : [vit_b, vit_h, vit_l]")
-    
+    parser.add_argument("--sam2_checkpoint_path", "-g", type=str, default="sam2.1_hiera_large.pt", help="path to the sam 2 model checkpoint")
+    # Hydra module is susceptible so please put your config in the sam2_repo/configs/sam2.1/ directory (see sam2 documentation for more details)
+    parser.add_argument("--sam2_config_file", "-y", type=str, default="configs/sam2.1/sam2.1_hiera_l.yaml", help="path to the sam2 model config file")
+
     parser.add_argument("--keepObject", "-k", action="store_true", default=False, help="If specified, the prompted object will be kept and the rest will be blacked out.")
     parser.add_argument("--saveMask", "-s", action="store_true", default=False, help="If specified, will save the mask that was used to black out the object")
 
@@ -258,8 +259,8 @@ if __name__ == "__main__":
     box_threshold = args.box_threshold
     text_threshold = args.text_threshold
     token_spans = args.token_spans
-    sam_checkpoint_path = Path(args.sam_checkpoint_path)
-    sam_checkpoint_type = args.sam_checkpoint_type
+    sam2_checkpoint_path = Path(args.sam2_checkpoint_path)
+    sam2_config_file = args.sam2_config_file
 
     # Device
     DEVICE = "cuda" if torch.cuda.is_available() and not args.cpu_only else "cpu"
@@ -274,7 +275,7 @@ if __name__ == "__main__":
     # List all image files in the directory
     image_files = [f.name for f in image_dir.iterdir() if f.is_file()]
 
-    model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam_checkpoint_path.as_posix(), sam_checkpoint_type, cpu_only=args.cpu_only)
+    model, predictor = load_models(config_file.as_posix(), checkpoint_path.as_posix(), sam2_checkpoint_path.as_posix(), sam2_config_file, cpu_only=args.cpu_only)
 
     for image_file in tqdm(image_files, desc="Processing images"):
         try:
