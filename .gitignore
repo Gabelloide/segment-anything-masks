@@ -1,4 +1,7 @@
 groundingdino/
 GroundingDINO_repo/
 Grounded-Segment-Anything/
+Grounded-SAM-2/
+sam2/
 *.pth
+*.pt
