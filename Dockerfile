@@ -27,7 +27,6 @@ RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
 # Upgrade pip and install required Python packages
 RUN python3.11 -m pip install --upgrade pip setuptools wheel
 
-
 RUN git clone https://github.com/facebookresearch/segment-anything.git
 
 # Create venv and install dependencies for SegmentAnything
@@ -60,19 +59,24 @@ RUN git clone https://github.com/IDEA-Research/GroundingDINO.git \
 RUN mkdir models \
     && cd models \
     && wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_h_4b8939.pth -O sam_vit_h.pth \
-    && wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_l_0b3195.pth -O sam_vit_l.pth \
-    && wget https://dl.fbaipublicfiles.com/segment_anything/sam_vit_b_01ec64.pth -O sam_vit_b.pth \
-    && wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth -O groundingdino_swint_ogc.pth
+    && wget https://github.com/IDEA-Research/GroundingDINO/releases/download/v0.1.0-alpha/groundingdino_swint_ogc.pth -O groundingdino_swint_ogc.pth \
+    && wget https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt
 
-# Move config file
-RUN mkdir -p /configs
-COPY GroundingDINO_SwinT_OGC.py /configs/
+# Clone code repo + install SAM2
+RUN git clone https://github.com/Gabelloide/segment-anything-masks.git && \
+    cd segment-anything-masks && \
+    git clone https://github.com/IDEA-Research/Grounded-SAM-2.git && \
+    cd Grounded-SAM-2 && \
+    pip install -e .
 
-# Copy main code
-COPY inference_on_a_image.py /
-COPY blackout_an_object_on_image.py /
-COPY run.sh /
-RUN chmod +x run.sh
+WORKDIR /segment-anything-masks
+
+# Add running scripts
+COPY run_masks.sh /segment-anything-masks
+COPY run_masks_sam2.sh /segment-anything-masks 
+COPY run_black_sam2.sh /segment-anything-masks 
+COPY run_black.sh /segment-anything-masks
+RUN chmod +x /segment-anything-masks/run_masks.sh /segment-anything-masks/run_black.sh /segment-anything-masks/run_black_sam2.sh /segment-anything-masks/run_masks_sam2.sh
 
 # output dirs
 RUN mkdir -p /output/images
@@ -85,4 +89,3 @@ ENV LD_LIBRARY_PATH="${LD_LIBRARY_PATH}\
 :/usr/lib/python3.11/site-packages/nvidia/cuda_runtime/lib\
 :/usr/lib/python3.11/site-packages/nvidia/cudnn/lib\
 :/usr/lib/python3.11/site-packages/nvidia/cufft/lib"
-
