@@ -207,7 +207,7 @@ def correct_mask_shape(masks:list) -> list:
     """Add a 3rd channel to the masks to adapt the code to SAM2.
     Since SAM2, predictor sometimes does not return the mask canal in mask[i].shape so we add a 3D canal"""
     corrected_masks = []
-    for i, mask in enumerate(masks):
+    for mask in masks:
         if mask.ndim == 2:  # If mask is 2D, convert it to 3D
             mask = np.stack([mask] * 3, axis=0)
         corrected_masks.append(mask)
