@@ -76,7 +76,7 @@ def load_groundingdino_model(model_config_path, model_checkpoint_path, cpu_only=
     return model
 
 
-def create_sam_mask(box_coordinates: list, image_path, sam_predictor, multiple_boxes=False):
+def create_sam_mask(box_coordinates: list, image_path, sam_predictor):
     """Computes SAM masks for a given image and box coordinates. The box_coordinates list is considered not empty to compute a mask.
     If multiple boxes are provided, the function will return several masks and scores.
     SAM is creating 3 masks for each box.
@@ -86,33 +86,13 @@ def create_sam_mask(box_coordinates: list, image_path, sam_predictor, multiple_b
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     sam_predictor.set_image(image)
 
-    if not multiple_boxes:
-        # Future results
-        results = {}
-        
-        # Process each box
-        for idx, box in enumerate(box_coordinates):
-            input_box = np.array([box])  # Ensure the box is in a list
-            masks, scores, logits = sam_predictor.predict(
-                box=input_box,
-                multimask_output=True,
-            )
-            
-            # Dictionary for the results
-            results[idx] = {
-                'masks': masks,
-                'scores': scores,
-                'logits': logits
-            }
-        return results
-    else:
-        masks, scores, logits = sam_predictor.predict(
-            point_coords=None,
-            point_labels=None,
-            box=box_coordinates,
-            multimask_output=True,
-        )
-        return masks, scores, logits
+    masks, scores, logits = sam_predictor.predict(
+        point_coords=None,
+        point_labels=None,
+        box=box_coordinates,
+        multimask_output=True,
+    )
+    return masks, scores, logits
 
 
 def get_grounding_output(model, image, caption, box_threshold, text_threshold=None, with_logits=True, cpu_only=False, token_spans=None):
@@ -223,6 +203,19 @@ def get_boxes(image_path, model, text_prompt, box_threshold, text_threshold=None
     return box_coords
 
 
+def correct_mask_shape(masks:list) -> list:
+    """Add a 3rd channel to the masks to adapt the code to SAM2.
+    Since SAM2, predictor sometimes does not return the mask canal in mask[i].shape so we add a 3D canal"""
+    corrected_masks = []
+    for i, mask in enumerate(masks):
+        if mask.ndim == 2:  # If mask is 2D, convert it to 3D
+            mask = np.stack([mask] * 3, axis=0)
+        corrected_masks.append(mask)
+
+    # corrected_masks is a regular list that must be converted to ndarray as (n,h,w) where n is the number of masks
+    corrected_masks = np.array(corrected_masks)
+    return corrected_masks
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -246,7 +239,6 @@ if __name__ == "__main__":
 
     parser.add_argument("--keepObject", "-k", action="store_true", default=False, help="If specified, the prompted object will be kept and the rest will be blacked out.")
     parser.add_argument("--saveMask", "-s", action="store_true", default=False, help="If specified, will save the mask that was used to black out the object")
-
 
     args = parser.parse_args()
     
@@ -289,15 +281,16 @@ if __name__ == "__main__":
             # If boxes are found, creating masks using SAM
             if len(box_coords) != 0 :
                 # ------------- SAM MASK GENERATION ----------------
-                masks, scores, logits = create_sam_mask(box_coords, image_path, predictor, multiple_boxes=True)
+                masks, scores, logits = create_sam_mask(box_coords, image_path, predictor)
                 
                 # Skip if no masks or scores found
                 if masks.size == 0 or scores.size == 0:
                     logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
                     continue
 
+                corrected_masks = correct_mask_shape(masks)
                 # Fuse all masks into one
-                fused_mask = fuse_masks(masks)
+                fused_mask = fuse_masks(corrected_masks)
 
                 # Save the fused mask as an image object
                 mask_image = (fused_mask * 255).astype(np.uint8)
