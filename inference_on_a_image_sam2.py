@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 warnings.filterwarnings("ignore")
 
 # Disable logging for cleaner print (uncomment)
-logging.disable(logging.CRITICAL)
+#logging.disable(logging.CRITICAL)
 
 
 def plot_boxes_to_image(image_pil, tgt):
@@ -319,6 +319,20 @@ def create_masks_from_box(box_coords: list, image_path, invert=False, split=Fals
     return np.array(masks)
 
 
+def correct_mask_shape(masks:list) -> list:
+    """Add a 3rd channel to the masks to adapt the code to SAM2.
+    Since SAM2, predictor sometimes does not return the mask canal in mask[i].shape so we add a 3D canal"""
+    corrected_masks = []
+    for i, mask in enumerate(masks):
+        if mask.ndim == 2:  # If mask is 2D, convert it to 3D
+            mask = np.stack([mask] * 3, axis=0)
+        corrected_masks.append(mask)
+
+    # corrected_masks is a regular list that must be converted to ndarray as (n,h,w) where n is the number of masks
+    corrected_masks = np.array(corrected_masks)
+    return corrected_masks
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_dir", "-d", type=str, required=True, help="path to image directory")
@@ -420,7 +434,7 @@ if __name__ == "__main__":
                     if args.invert:
                         mask_image = 255 - mask_image
 
-                    mask_filename = output_dir / f"{Path(image_file).stem}_box_{idx}.png"  # Unique name for each box
+                    mask_filename = output_dir / f"{Path(image_file).stem}_mask_{idx}.png"  # Unique name for each box
                     cv2.imwrite(mask_filename.as_posix(), mask_image)
                     logging.info(f"Saved {mask_filename} with score {best_score:.4f}")
                     
@@ -435,7 +449,6 @@ if __name__ == "__main__":
                     # TODO FIX INVERT for fused mask with boxes
                     print("Invert not implemented for fused mask with boxes. (invert option is ignored)")
                     
-                
                 # Save the fused mask
                 mask_filename = output_dir / f"{Path(image_file).stem}.png"
                 cv2.imwrite(mask_filename.as_posix(), fused_mask)
@@ -450,8 +463,10 @@ if __name__ == "__main__":
                     logging.warning(f"No masks or scores found for the provided boxes. Skipping.")
                     continue
 
+                corrected_masks = correct_mask_shape(masks)
+    
                 # Fuse all masks into one
-                fused_mask = fuse_masks(masks)
+                fused_mask = fuse_masks(corrected_masks)
 
                 # Save the fused mask
                 mask_image = (fused_mask * 255).astype(np.uint8)
